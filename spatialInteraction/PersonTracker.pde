@@ -37,16 +37,17 @@ class PersonTracker {
       }
       
       for (int i = this.persons.size()-1; i >= 0; i--){
-          myClient.write(clientId + ":" + i + ":" + this.persons.get(i).getPosition().x + ":" + this.persons.get(i).getPosition().y);
           if (this.persons.get(i).isReadyForDeletion()){
               this.persons.remove(i);
           }
        }
     }
     
-    myClient.write(clientId + ":" + "400" + ":" + "30" );
-    
     this.displayPersons();
+  }
+  
+  public ArrayList<Person> getPersons() {
+    return this.persons;
   }
   
   public void displayPersons() {

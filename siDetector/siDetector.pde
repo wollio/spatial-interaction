@@ -5,17 +5,20 @@ import processing.core.PApplet;
 import processing.core.PConstants;
 import processing.core.PImage;
 import processing.video.Capture;
+import processing.net.*;
 
 import java.util.ArrayList;
 
 Capture cam;
-
+Client myClient; 
 DeepVision deepVision = new DeepVision(this);
 YOLONetwork yolo;
 ResultList<ObjectDetectionResult> detections;
 PersonTracker tracker;
 
 int textSize = 12;
+int camIndex = 0;
+int clientId = 0;
 
 public void setup() {
   size(640, 480, FX2D);
@@ -31,7 +34,9 @@ public void setup() {
   String[] cameras = Capture.list();
   printArray(cameras);
   
+  clientId = round(random(0, 1000));
   tracker = new PersonTracker();
+  myClient = new Client(this, "127.0.0.1", 5204);
 
   cam = new Capture(this, cameras[1]);
   cam.start();
@@ -73,7 +78,44 @@ public void draw() {
   
   tracker.handleDetections(detections);
 
-  
-
   surface.setTitle("Webcam YOLO Test - FPS: " + Math.round(frameRate));
+}
+
+void chooseCam() {
+  cam.stop();
+  String[] cameras = Capture.list();
+  printArray(cameras);
+  println(camIndex);
+  camIndex++;
+  if (camIndex > cameras.length - 1) {
+     camIndex = 0;
+  }
+  cam = new Capture(this, cameras[camIndex]);
+  cam.start();
+}
+
+void keyPressed() {
+  if (keyCode == 68) {
+    chooseCam();
+  }
+  
+  //49 --> 1
+  //50 --> 2
+  //51 --> 3
+  
+  if (keyCode == 49) {
+    sendMouseLocation(0);
+  }
+  
+  if (keyCode == 50) {
+    sendMouseLocation(1);
+  }
+  
+  if (keyCode == 51) {
+    sendMouseLocation(2);
+  }
+}
+
+void sendMouseLocation(int spotNumber) {
+  myClient.write("spotNumber" + ":" + spotNumber + ":" + mouseX + ":" + mouseY);
 }

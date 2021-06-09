@@ -1,48 +1,70 @@
 // import everything necessary to make sound.
+import javax.sound.sampled.*;
+import java.util.ArrayList;
+
 import ddf.minim.*;
 import ddf.minim.ugens.*;
 
-import javax.sound.sampled.*;
+import ch.bildspur.vision.*;
+import ch.bildspur.vision.result.*;
 
-import processing.net.*;
+import processing.core.PApplet;
+import processing.core.PConstants;
+import processing.core.PImage;
+import processing.video.Capture;
 
 // create all of the variables that will need to be accessed in
 // more than one methods (setup(), draw(), stop()).
-Minim minim;
-AudioOutput out;
-
-Mixer.Info[] mixerInfo;
-Oscil sineOsc;
-Server myServer;
+Capture cam;
+DeepVision deepVision = new DeepVision(this);
+YOLONetwork yolo;
+ResultList<ObjectDetectionResult> detections;
+PersonTracker tracker;
 
 boolean muted = true;
 
 float freq = 100.0;
 float ampl = 0.1;
 
+int textSize = 12;
+int camIndex = 0;
+int clientId = 0;
+
+int alarmDist = 120;
+
+ArrayList<Mushroom> mushrooms = new ArrayList<Mushroom>();
 
 // setup is run once at the beginning
 void setup()
 {
   // initialize the drawing window
-  size( 512, 200, P2D );
-  
-  myServer = new Server(this, 5204);
+  size(640, 480, FX2D);
 
-  // initialize the minim and out objects
-  minim = new Minim( this );
-  out = minim.getLineOut( Minim.MONO, 2048 );
+  colorMode(HSB, 360, 100, 100);
   
-  // play another note with the myNote object
-  //out.playNote(3.5, 2.6, myNote );
-  
-  mixerInfo = AudioSystem.getMixerInfo();
+  Mixer.Info[] mixerInfo = AudioSystem.getMixerInfo();
+  int mushroomId = 0;
+  for(int i = 0; i < mixerInfo.length; i++) {
+    println(i + " = " + mixerInfo[i].getName());
+    if (mixerInfo[i].getName().equals("Gigaport 1") || mixerInfo[i].getName().equals("Gigaport 2") || mixerInfo[i].getName().equals("Gigaport 3")) {
+      mushrooms.add(new Mushroom(new Minim(this), mixerInfo[i], mushroomId));
+      mushroomId++;
+    }
+  }
  
-  for(int i = 0; i < mixerInfo.length; i++)
-  {println(i + " = " + mixerInfo[i].getName());} 
+  println("creating model...");
+  yolo = deepVision.createYOLOv4Tiny();
+
+  println("loading yolo model...");
+  yolo.setup();
   
-  sineOsc = new Oscil( 587.3f, 0.9, Waves.TRIANGLE );
-  sineOsc.patch(out);
+  String[] cameras = Capture.list();
+  printArray(cameras);
+  
+  tracker = new PersonTracker();
+
+  cam = new Capture(this, cameras[1]);
+  cam.start();
 }
 
 // draw is run many times
@@ -50,34 +72,67 @@ void draw()
 {
   // erase the window to black
   background( 0 );
-  // draw using a white stroke
-  stroke( 255 );
   
-  //float freq = map(mouseX, 0, width, 1, 20154);
-  sineOsc.setFrequency(90f);
+  if (cam.available()) {
+    cam.read();
+  }
+
+  image(cam, 0, 0);
+
+  if (cam.width == 0) {
+    return;
+  }
+
+  yolo.setConfidenceThreshold(0.2f);
+  detections = yolo.run(cam);
+
+  strokeWeight(3f);
+  textSize(textSize);
   
-  String input;
-  int[] data;
-  float amplitude = 0f;
-  Client c = myServer.available();
-  
-  if (c != null) {
-    input = c.readString(); 
-    input = input.substring(0, input.indexOf("\n"));  // Only up to the newline
-    data = int(split(input, ':'));  // Split values into an array
-    // Draw line using received coords
-    //stroke(0);
-    println(input);
-    amplitude = map(data[2], 0, 300, 0, 0.3);
-    
+  for (ObjectDetectionResult detection : detections) {
+    int hue = (int)(360.0 / yolo.getLabels().size() * detection.getClassId());
+
+    noFill();
+    stroke(hue, 80, 100);
+    rect(detection.getX(), detection.getY(), detection.getWidth(), detection.getHeight());
+
+    fill(hue, 80, 100);
+    rect(detection.getX(), detection.getY() - (textSize + 3), textWidth(detection.getClassName()) + 4, textSize + 3);
+
+    fill(0);
+    textAlign(LEFT, TOP);
+    text(detection.getClassName(), detection.getX() + 2, detection.getY() - textSize - 3);
   }
   
-  if (muted) {
-    sineOsc.setAmplitude(0f);
-  } else {
-    sineOsc.setAmplitude(amplitude);
+  tracker.handleDetections(detections);
+
+  surface.setTitle("Webcam YOLO Test - FPS: " + Math.round(frameRate));
+  
+  for (Person p : this.tracker.getPersons()) {
+    for (Mushroom m : this.mushrooms) {
+      if (p.getPosition().dist(m.position) < alarmDist) {
+        m.personsInRange++;
+      }
+    }
   }
-   
+  
+  for (Mushroom m : this.mushrooms) {
+    m.render();
+  }
+  
+}
+
+void chooseCam() {
+  cam.stop();
+  String[] cameras = Capture.list();
+  printArray(cameras);
+  println(camIndex);
+  camIndex++;
+  if (camIndex > cameras.length - 1) {
+     camIndex = 0;
+  }
+  cam = new Capture(this, cameras[camIndex]);
+  cam.start();
 }
 
 void keyPressed() {
@@ -85,5 +140,32 @@ void keyPressed() {
   if (keyCode == 77) {
     muted = !muted;
   }
-  println(muted);
+  
+  if (keyCode == 68) {
+    chooseCam();
+  }
+  
+  if (keyCode == 49) {
+    setMushroomLocation(0);
+  }
+  
+  if (keyCode == 50) {
+    setMushroomLocation(1);
+  }
+  
+  if (keyCode == 51) {
+    setMushroomLocation(2);
+  }
+  
+}
+
+void setMushroomLocation(int spotNumber) {
+  
+  for (Mushroom m : this.mushrooms) {
+    if (m.id == spotNumber) {
+      m.setPosition(mouseX, mouseY);
+    }
+  }
+  
+  println(mouseX + " "+ mouseY);
 }
